@@ -1,0 +1,303 @@
+// ============================================================
+// Sistema Profesional de Ventas, Inventario y POS
+// Schema completo - SQLite
+// ============================================================
+
+generator client {
+  provider        = "prisma-client-js"
+  // Incluimos binarios para Linux (host de build) Y Windows (destino)
+  // para que el .exe funcione sin necesidad de regenerar Prisma en Windows.
+  binaryTargets   = ["native", "windows"]
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ---------- Autenticación y Usuarios ----------
+model User {
+  id            String   @id @default(cuid())
+  username      String   @unique
+  passwordHash  String
+  name          String
+  role          String   @default("vendor") // admin | vendor
+  permissions   String   @default("[]") // JSON array of permission keys
+  authPassword  String?  // contraseña secundaria de autorización
+  active        Boolean  @default(true)
+  email         String?
+  phone         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  sales         Sale[]
+  auditLogs     AuditLog[]
+  expenses      Expense[]
+  purchases     Purchase[]
+  authorizedActions AuditLog[] @relation("AuthorizedBy")
+}
+
+// ---------- Catálogos ----------
+model Category {
+  id        String    @id @default(cuid())
+  name      String
+  parentId  String?
+  parent    Category? @relation("CategoryParent", fields: [parentId], references: [id], onDelete: SetNull)
+  children  Category[] @relation("CategoryParent")
+  products  Product[]
+  createdAt DateTime  @default(now())
+}
+
+model Brand {
+  id        String    @id @default(cuid())
+  name      String    @unique
+  products  Product[]
+  createdAt DateTime  @default(now())
+}
+
+model Supplier {
+  id          String     @id @default(cuid())
+  name        String
+  document    String?    // RUC/DNI
+  phone       String?
+  email       String?
+  address     String?
+  contact     String?
+  notes       String?
+  createdAt   DateTime   @default(now())
+  products    Product[]
+  purchases   Purchase[]
+}
+
+// ---------- Productos ----------
+model Product {
+  id              String   @id @default(cuid())
+  name            String
+  internalCode    String   @unique
+  barcode         String?  @unique
+  gs1Code         String?
+  image           String?  // url o path
+  categoryId      String?
+  category        Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  brandId         String?
+  brand           Brand?    @relation(fields: [brandId], references: [id], onDelete: SetNull)
+  supplierId      String?
+  supplier        Supplier? @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+
+  purchasePrice   Float    @default(0)
+  salePrice       Float    @default(0)
+  wholesalePrice Float    @default(0)
+
+  stock           Float    @default(0)
+  minStock        Float    @default(0)
+  unit            String   @default("unidad")
+
+  // ubicación física
+  locationWarehouse String?
+  locationAisle     String?
+  locationShelf     String?
+  locationLevel     String?
+
+  expiryDate       DateTime?
+  lot              String?
+  status           String   @default("active") // active | discontinued
+  isFavorite       Boolean  @default(false)
+  isBundle         Boolean  @default(false)
+
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  saleItems        SaleItem[]
+  purchaseItems    PurchaseItem[]
+  bundleItems      BundleItem[]  // productos que componen bundles
+  bundle           Bundle?        // si el producto es un bundle
+  movements        InventoryMovement[]
+}
+
+// ---------- Combos / Bundles ----------
+model Bundle {
+  id          String   @id @default(cuid())
+  productId    String   @unique
+  product     Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  price       Float    @default(0)
+  items       BundleItem[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model BundleItem {
+  id         String   @id @default(cuid())
+  bundleId   String
+  bundle     Bundle   @relation(fields: [bundleId], references: [id], onDelete: Cascade)
+  productId   String
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  quantity   Float    @default(1)
+}
+
+// ---------- Clientes ----------
+model Customer {
+  id            String   @id @default(cuid())
+  name          String
+  document      String?  // DNI/RUC
+  phone         String?
+  email         String?
+  address       String?
+  creditLimit   Float    @default(0)
+  creditBalance Float    @default(0) // saldo pendiente
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  sales         Sale[]
+  payments      Payment[] // pagos de abonos a crédito
+}
+
+// ---------- Ventas ----------
+model Sale {
+  id            String   @id @default(cuid())
+  invoiceNumber String   @unique
+  customerId    String?
+  customer      Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  userId        String
+  user          User     @relation(fields: [userId], references: [id])
+  subtotal      Float    @default(0)
+  discount      Float    @default(0)
+  tax           Float    @default(0)
+  total         Float    @default(0)
+  paidAmount    Float    @default(0)
+  creditBalance Float    @default(0) // saldo pendiente si venta a crédito
+  status        String   @default("completed") // completed | credit | voided | suspended
+  paymentMethod String   @default("cash") // cash | card | yape | plin | transfer | credit | mixed
+  notes         String?
+  observations  String?
+  voidReason    String?
+  voidedAt      DateTime?
+  voidedBy      String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  items         SaleItem[]
+  payments     Payment[]
+  auditLogs     AuditLog[]
+}
+
+model SaleItem {
+  id           String  @id @default(cuid())
+  saleId       String
+  sale         Sale    @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  productId     String
+  product      Product @relation(fields: [productId], references: [id])
+  name         String  // snapshot
+  quantity     Float
+  unitPrice    Float
+  discount     Float   @default(0)
+  total        Float
+}
+
+model Payment {
+  id           String   @id @default(cuid())
+  saleId       String
+  sale         Sale     @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  customerId   String?
+  customer     Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  method       String   // cash | card | yape | plin | transfer
+  amount       Float
+  reference    String?
+  createdAt    DateTime @default(now())
+}
+
+// ---------- Compras y Gastos ----------
+model Purchase {
+  id            String   @id @default(cuid())
+  supplierId    String?
+  supplier      Supplier? @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  documentNo    String?
+  userId        String
+  user          User     @relation(fields: [userId], references: [id])
+  total         Float    @default(0)
+  attachment    String?  // foto del comprobante
+  notes         String?
+  createdAt     DateTime @default(now())
+  items         PurchaseItem[]
+}
+
+model PurchaseItem {
+  id           String  @id @default(cuid())
+  purchaseId   String
+  purchase     Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  productId     String
+  product      Product  @relation(fields: [productId], references: [id])
+  name         String
+  quantity     Float
+  unitCost     Float
+  total        Float
+}
+
+model Expense {
+  id          String   @id @default(cuid())
+  category    String   // transporte | servicios | alquiler | otros
+  description String
+  amount      Float
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  createdAt   DateTime @default(now())
+}
+
+// ---------- Inventario ----------
+model InventoryMovement {
+  id          String   @id @default(cuid())
+  productId   String
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  type        String   // in | out | adjust | sale | purchase
+  quantity    Float
+  reason      String?
+  userId      String?
+  refType     String?  // sale | purchase | manual
+  refId       String?
+  createdAt   DateTime @default(now())
+}
+
+// ---------- Auditoría ----------
+model AuditLog {
+  id            String   @id @default(cuid())
+  userId        String?
+  user          User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action        String
+  entity        String
+  entityId      String?
+  oldValue      String?  // JSON
+  newValue      String?  // JSON
+  authorizedById String?
+  authorizedBy  User?   @relation("AuthorizedBy", fields: [authorizedById], references: [id], onDelete: SetNull)
+  saleId        String?
+  sale          Sale?    @relation(fields: [saleId], references: [id], onDelete: SetNull)
+  ip            String?
+  createdAt     DateTime @default(now())
+}
+
+// ---------- Configuración ----------
+model Setting {
+  id    String @id @default(cuid())
+  key   String @unique
+  value String // JSON string
+}
+
+// ---------- Backups ----------
+model Backup {
+  id        String   @id @default(cuid())
+  filename  String
+  size      Int
+  data      String   // JSON completo
+  auto      Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+// ---------- Cola de sincronización offline ----------
+model SyncQueue {
+  id        String   @id @default(cuid())
+  entity    String
+  operation String   // create | update | delete
+  payload   String   // JSON
+  status    String   @default("pending") // pending | done | error
+  createdAt DateTime @default(now())
+  processedAt DateTime?
+}

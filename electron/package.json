@@ -1,0 +1,18 @@
+{
+  "name": "pos-pro-desktop",
+  "productName": "POS Pro",
+  "version": "1.0.0",
+  "description": "Sistema profesional de Ventas, Inventario y Punto de Venta (POS)",
+  "author": "POS Pro",
+  "main": "main.js",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dev": "cross-env ELECTRON_DEV=1 electron ."
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "cross-env": "^7.0.3"
+  }
+}
