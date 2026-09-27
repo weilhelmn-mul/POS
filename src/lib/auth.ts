@@ -85,3 +85,27 @@ export async function getSessionUser(userId: string): Promise<SessionUser | null
     permissions: perms,
   }
 }
+
+// ---- Reset password tokens ----
+const RESET_TTL_MS = 60 * 60 * 1000
+export function createResetToken(userId: string): string {
+  const payload = JSON.stringify({ uid: userId, ts: Date.now(), exp: Date.now() + RESET_TTL_MS })
+  const encoded = Buffer.from(payload).toString('base64url')
+  const sig = createHmac('sha256', SECRET).update(encoded).digest('hex')
+  return `${encoded}.${sig}`
+}
+export function verifyResetToken(token: string): { uid: string; exp: number } | null {
+  const idx = token.lastIndexOf('.')
+  if (idx === -1) return null
+  const encoded = token.slice(0, idx)
+  const sig = token.slice(idx + 1)
+  const expected = createHmac('sha256', SECRET).update(encoded).digest('hex')
+  try {
+    if (sig.length !== expected.length) return null
+    if (!timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null
+    const json = JSON.parse(Buffer.from(encoded, 'base64url').toString())
+    if (!json.uid || !json.exp) return null
+    if (Date.now() > json.exp) return null
+    return { uid: json.uid, exp: json.exp }
+  } catch { return null }
+}

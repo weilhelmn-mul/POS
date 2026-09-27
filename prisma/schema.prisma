@@ -27,6 +27,13 @@ model User {
   active        Boolean  @default(true)
   email         String?
   phone         String?
+  // ── Recuperación de contraseña ──
+  resetToken       String?  @unique
+  resetTokenExpiry DateTime?
+  emailVerified    DateTime?
+  lastLoginAt      DateTime?
+  failedLoginAttempts Int  @default(0)
+  lockedUntil      DateTime?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -140,6 +147,13 @@ model Customer {
   name          String
   document      String?  // DNI/RUC
   phone         String?
+  // ── Recuperación de contraseña ──
+  resetToken       String?  @unique
+  resetTokenExpiry DateTime?
+  emailVerified    DateTime?
+  lastLoginAt      DateTime?
+  failedLoginAttempts Int  @default(0)
+  lockedUntil      DateTime?
   email         String?
   address       String?
   creditLimit   Float    @default(0)

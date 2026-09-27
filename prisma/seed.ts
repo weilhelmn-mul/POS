@@ -28,6 +28,7 @@ async function main() {
       passwordHash: hashPassword('vendedor123'),
       name: 'Vendedor Demo',
       role: 'vendor',
+      email: 'vendedor@minegocio.com',
       permissions: JSON.stringify([
         'products.view', 'sales.create', 'sales.view', 'sales.reprint',
         'customers.create', 'customers.edit', 'receivables.view', 'reports.view',

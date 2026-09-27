@@ -50,7 +50,7 @@ async function syncSupabase(collection: string, config: DatabaseConfig, directio
     result.ok = false
     return result
   }
-  const supabase = getSupabase(config.supabaseUrl, config.supabaseAnonKey)
+  const supabase = await getSupabase(config.supabaseUrl, config.supabaseAnonKey)
 
   // UPLOAD: leer locales y subir
   if (direction === 'upload' || direction === 'both') {
@@ -89,7 +89,7 @@ async function syncFirebase(collection: string, config: DatabaseConfig, directio
     result.ok = false
     return result
   }
-  const { db: fs } = getFirebase(config.firebaseConfig)
+  const { db: fs } = await getFirebase(config.firebaseConfig)
   const { collection: col, getDocs, writeBatch, doc } = await import('firebase/firestore')
   const colRef = col(fs, collection)
 

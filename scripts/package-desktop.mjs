@@ -40,8 +40,12 @@ async function main() {
   log(`Plataforma destino: ${PLATFORM}`)
 
   // 1. Build Next.js standalone
-  log('Construyendo Next.js (standalone)...')
-  run('bun run build')
+  if (!fs.existsSync(path.join(SERVER_SRC, 'server.js'))) {
+    log('Construyendo Next.js (standalone)...')
+    run('bun run build')
+  } else {
+    log('Build ya existe en .next/standalone — saltando build')
+  }
 
   // 2. Asegurar prisma client generado
   log('Generando Prisma Client...')
@@ -84,6 +88,13 @@ async function main() {
   // Copiar schema de Prisma (para futuras migraciones)
   fs.mkdirSync(path.join(BUILD_TMP, 'prisma'), { recursive: true })
   fs.copyFileSync(PRISMA_SCHEMA, path.join(BUILD_TMP, 'prisma', 'schema.prisma'))
+
+  // Copiar script de migración
+  const migrateScriptSrc = path.join(APP_DIR, 'scripts', 'migrate-db.js')
+  if (fs.existsSync(migrateScriptSrc)) {
+    fs.copyFileSync(migrateScriptSrc, path.join(BUILD_TMP, 'migrate-db.js'))
+    log('  ✓ migrate-db.js copiado')
+  }
 
   // Crear BD plantilla con schema + datos demo (evita necesitar prisma CLI en runtime)
   log('Creando BD plantilla (template.db)...')
@@ -145,7 +156,41 @@ async function main() {
     quiet: false,
   })
 
-  log(`✓ Empaquetado completo: ${appPaths.join(', ')}`)
+  
+  // ── POST-PROCESO: STRIPPING ──
+  const packagedDir = appPaths[0]
+  log(`\n[strip] Optimizando tamaño...`)
+  let strippedBytes = 0
+  function dirSize(p) { if (!fs.existsSync(p)) return 0; const s = fs.statSync(p); if (s.isFile()) return s.size; return fs.readdirSync(p).reduce((a, e) => a + dirSize(path.join(p, e)), 0) }
+  function stripFile(rel, reason) { const abs = path.join(packagedDir, rel); if (!fs.existsSync(abs)) return; const sz = dirSize(abs); fs.rmSync(abs, { recursive: true, force: true }); strippedBytes += sz; log(`  ✓ ${rel} (${(sz/1024/1024).toFixed(1)} MB) — ${reason}`) }
+  // Locales — mantener solo es + en-US
+  if (PLATFORM === 'win32') { const ld = path.join(packagedDir, 'locales'); if (fs.existsSync(ld)) { const keep = new Set(['es.pak','es-419.pak','en-US.pak']); let lb = 0; for (const f of fs.readdirSync(ld)) { if (!keep.has(f)) { lb += fs.statSync(path.join(ld, f)).size; fs.rmSync(path.join(ld, f), { force: true }) } } strippedBytes += lb; log(`  ✓ locales (${(lb/1024/1024).toFixed(1)} MB)`) } }
+  stripFile('LICENSES.chromium.html', 'licencias')
+  // Prisma Linux engines
+  const ped = path.join(packagedDir, 'resources', 'server', 'node_modules', '@prisma', 'engines')
+  if (fs.existsSync(ped)) { for (const f of fs.readdirSync(ped)) { if (f.includes('debian')||f.includes('linux')||f.includes('darwin')||f.includes('arm')) { const sz = fs.statSync(path.join(ped, f)).size; fs.rmSync(path.join(ped, f), { recursive: true, force: true }); strippedBytes += sz } } const dd = path.join(ped, 'dist'); if (fs.existsSync(dd)) { const sz = dirSize(dd); fs.rmSync(dd, { recursive: true, force: true }); strippedBytes += sz } }
+  const pcd = path.join(packagedDir, 'resources', 'server', 'node_modules', '.prisma', 'client')
+  if (fs.existsSync(pcd)) { for (const f of fs.readdirSync(pcd)) { if (f.startsWith('libquery_engine-debian')||f.startsWith('libquery_engine-linux')||f.startsWith('libquery_engine-darwin')) { const sz = fs.statSync(path.join(pcd, f)).size; fs.rmSync(path.join(pcd, f), { force: true }); strippedBytes += sz } } }
+  // @img sharp Linux
+  const id = path.join(packagedDir, 'resources', 'server', 'node_modules', '@img')
+  if (fs.existsSync(id)) { for (const f of fs.readdirSync(id)) { if (f.includes('linux')||f.includes('darwin')||f.includes('arm')) { const sz = dirSize(path.join(id, f)); fs.rmSync(path.join(id, f), { recursive: true, force: true }); strippedBytes += sz } } }
+  // typescript
+  stripFile('resources/server/node_modules/typescript', 'TS build-only')
+  // .next/cache
+  const nc = path.join(packagedDir, 'resources', 'server', '.next', 'cache')
+  if (fs.existsSync(nc)) { const sz = dirSize(nc); fs.rmSync(nc, { recursive: true, force: true }); strippedBytes += sz }
+  // WASM engines de otros DBs (preservar query_engine_bg.wasm como fallback)
+  const ue = ['query_engine_bg.postgresql.wasm-base64.js','query_engine_bg.postgresql.wasm-base64.mjs','query_engine_bg.cockroachdb.wasm-base64.js','query_engine_bg.cockroachdb.wasm-base64.mjs','query_engine_bg.sqlserver.wasm-base64.js','query_engine_bg.sqlserver.wasm-base64.mjs','query_engine_bg.mysql.wasm-base64.js','query_engine_bg.mysql.wasm-base64.mjs','query_engine_bg.mongodb.wasm-base64.js','query_engine_bg.mongodb.wasm-base64.mjs','query_engine_bg.cassandra.wasm-base64.js','query_engine_bg.cassandra.wasm-base64.mjs']
+  let wb = 0; function walkWasm(d) { if (!fs.existsSync(d)) return; try { for (const e of fs.readdirSync(d)) { const fp = path.join(d, e); const s = fs.statSync(fp); if (s.isDirectory()) walkWasm(fp); else if (ue.includes(e)) { wb += s.size; fs.rmSync(fp, { force: true }) } } } catch {} }
+  walkWasm(path.join(packagedDir, 'resources', 'server', 'node_modules', '@prisma', 'client'))
+  walkWasm(path.join(packagedDir, 'resources', 'server', '.next', 'node_modules'))
+  if (wb > 0) { strippedBytes += wb; log(`  ✓ WASM engines otros DBs (${(wb/1024/1024).toFixed(1)} MB)`) }
+  // capsize
+  const cf = path.join(packagedDir, 'resources', 'server', 'node_modules', 'next', 'dist', 'server', 'capsize-font-metrics.json')
+  if (fs.existsSync(cf)) { const sz = fs.statSync(cf).size; fs.rmSync(cf, { force: true }); strippedBytes += sz }
+  log(`\n[strip] Total liberado: ${(strippedBytes/1024/1024).toFixed(1)} MB`)
+
+  log(`✓ Empaquetado completo: ${packagedDir}`)
   log(`\nPróximo paso (Windows): compilar el instalador con Inno Setup:`)
   log(`  iscc installer\\pos-pro.iss`)
   log(`  -> genera installer\\Output\\POSPro-Setup-${require('../electron/package.json').version}.exe`)

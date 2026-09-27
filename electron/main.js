@@ -42,8 +42,26 @@ function getDatabasePath() {
  * (que ya trae el schema aplicado + datos demo) al userData.
  * Esto evita necesitar `prisma db push` / `prisma generate` en runtime.
  */
+
+/** Normaliza un path de Windows para Prisma. */
+function normalizeDbPathForPrisma(p) {
+  return p.replace(/\\\\/g, '/')
+}
+
+/** Logger de diagnóstico a archivo. */
+function logDiag(message) {
+  try {
+    const logFile = path.join(app.getPath('userData'), 'pos-pro.log')
+    const ts = new Date().toISOString()
+    fs.appendFileSync(logFile, `[${ts}] ${message}\n`, { encoding: 'utf-8' })
+    console.log(`[diag] ${message}`)
+  } catch (e) { console.error('[diag] no se pudo escribir log:', e) }
+}
+
 function ensureDatabase() {
   const dbPath = getDatabasePath()
+  logDiag(`[db] database path: ${dbPath}`)
+  logDiag(`[db] database exists: ${fs.existsSync(dbPath)}`)
   if (fs.existsSync(dbPath)) return false
 
   const serverDir = getServerDir()
@@ -51,11 +69,40 @@ function ensureDatabase() {
 
   if (fs.existsSync(templatePath)) {
     fs.copyFileSync(templatePath, dbPath)
-    console.log('[db] BD inicializada desde template.db')
+    logDiag('[db] BD inicializada desde template.db ✓')
   } else {
     console.warn('[db] template.db no encontrado en', templatePath)
   }
   return true
+}
+
+
+/**
+ * Ejecuta la migración de BD de forma async ANTES de iniciar el servidor.
+ */
+async function runMigration(dbUrl, serverDir) {
+  const migrateScript = path.join(serverDir, 'migrate-db.js')
+  if (!fs.existsSync(migrateScript)) {
+    logDiag('[migrate] ⚠ migrate-db.js no encontrado — omitiendo migración')
+    return { ok: false, skipped: true }
+  }
+  logDiag('[migrate] iniciando migración de BD...')
+  const originalCwd = process.cwd()
+  try {
+    process.chdir(serverDir)
+    process.env.DATABASE_URL = dbUrl
+    process.env.NODE_ENV = 'production'
+    const { migrateDatabase } = require(migrateScript)
+    const result = await migrateDatabase()
+    if (result.ok) logDiag(`[migrate] ✓ migración OK (${result.migrated} añadidas, ${result.skipped} ya existían)`)
+    else logDiag(`[migrate] ⚠ migración falló: ${result.error || 'error'}`)
+    return result
+  } catch (e) {
+    logDiag(`[migrate] ⚠ Error (no fatal): ${e.message}`)
+    return { ok: false, error: e.message }
+  } finally {
+    try { process.chdir(originalCwd) } catch (_) {}
+  }
 }
 
 /** Inicia el servidor Next.js standalone como proceso hijo */
@@ -77,11 +124,13 @@ function startServer() {
       ...process.env,
       NODE_ENV: 'production',
       PORT: String(PORT),
-      DATABASE_URL: `file:${dbPath}`,
+      DATABASE_URL: `file:${normalizeDbPathForPrisma(dbPath)}`,
+      POS_USER_DATA: app.getPath('userData'),
       ELECTRON_RUN: '1',
       SESSION_SECRET: process.env.SESSION_SECRET || 'pos-pro-electron-secret-change-me',
       PRISMA_LOG: 'error',
     }
+    logDiag(`[server] DATABASE_URL: file:${normalizeDbPathForPrisma(dbPath)}`)
 
     // IMPORTANTE: usar stdio: 'inherit' (no ['ignore', 'pipe', 'pipe'])
     // fork() exige un canal IPC; 'inherit' lo asigna automáticamente.
@@ -245,13 +294,22 @@ if (!gotLock) {
 
     try {
       ensureDatabase()
+      const serverDir = getServerDir() || process.cwd()
+      const dbPath = getDatabasePath()
+      const dbUrl = `file:${normalizeDbPathForPrisma(dbPath)}`
+      logDiag('[main] ejecutando migración de BD...')
+      const migrationResult = await runMigration(dbUrl, serverDir)
+      if (migrationResult && !migrationResult.ok && !migrationResult.skipped) logDiag('[main] ⚠ migración no exitosa, continuando')
+      logDiag('[main] iniciando servidor Next.js...')
       const url = await startServer()
+      logDiag(`[main] servidor listo en ${url}`)
       createWindow(url)
     } catch (e) {
       const msg = e.message || String(e)
+      logDiag(`[main] ERROR FATAL: ${msg}`)
       dialog.showErrorBox(
         'Error al iniciar POS Pro',
-        msg + '\n\n---\nSi el problema persiste:\n1. Verifica que ningún antivirus bloquee la app\n2. Cierra instancias previas de POS Pro\n3. Contacta soporte'
+        msg + '\n\n---\nSi el problema persiste:\n1. Verifica que ningún antivirus bloquee la app\n2. Instala Visual C++ Redistributable 2015-2022 x64 (https://aka.ms/vs/17/release/vc_redist.x64.exe)\n3. Cierra instancias previas de POS Pro\n4. Revisa el log en: ' + path.join(app.getPath('userData'), 'pos-pro.log'))
       )
       app.quit()
     }

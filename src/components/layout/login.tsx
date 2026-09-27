@@ -5,62 +5,33 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
-import { ShoppingCart, Loader2, Eye, EyeOff } from 'lucide-react'
-
+import { ThemeToggle } from './theme-toggle'
+import { Loader2, Eye, EyeOff, Mail, ArrowLeft, CheckCircle2, AlertCircle, KeyRound } from 'lucide-react'
+type View = 'login' | 'forgot' | 'sent' | 'reset' | 'reset-done'
 export function Login() {
   const { login } = useAuth()
+  const [view, setView] = useState<View>('login')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [show, setShow] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-
-  const onSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setLoading(true); setError('')
-    const res = await login(username.trim(), password)
-    setLoading(false)
-    if (!res.ok) setError(res.error || 'Error')
-  }
-
+  const [hint, setHint] = useState('')
+  const [forgotEmail, setForgotEmail] = useState('')
+  const [resetToken, setResetToken] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [resetMessage, setResetMessage] = useState('')
+  const onSubmit = async (e: React.FormEvent) => { e.preventDefault(); setLoading(true); setError(''); setHint(''); const res = await login(username.trim(), password); setLoading(false); if (!res.ok) { setError(res.error || 'Error al iniciar sesión'); if (res.hint) setHint(res.hint) } }
+  const onForgot = async (e: React.FormEvent) => { e.preventDefault(); setLoading(true); setError(''); try { const r = await fetch('/api/auth/forgot-password', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: forgotEmail.trim() }) }); const data = await r.json().catch(() => ({})); if (!r.ok) setError(data.error || 'No se pudo procesar'); else { if (data.devResetUrl) setResetToken(data.devResetUrl.split('token=')[1] || ''); setView('sent') } } catch { setError('Error de red.') } finally { setLoading(false) } }
+  const onReset = async (e: React.FormEvent) => { e.preventDefault(); setError(''); if (newPassword.length < 8) { setError('La contraseña debe tener al menos 8 caracteres'); return } if (newPassword !== confirmPassword) { setError('Las contraseñas no coinciden'); return } setLoading(true); try { const r = await fetch('/api/auth/reset-password', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: resetToken.trim(), password: newPassword }) }); const data = await r.json().catch(() => ({})); if (!r.ok) setError(data.error || 'El enlace ha expirado o es inválido'); else { setView('reset-done'); setResetMessage('Tu contraseña fue actualizada. Ya puedes iniciar sesión.') } } catch { setError('Error de red.') } finally { setLoading(false) } }
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary/5 via-background to-accent/10 p-4">
-      <Card className="w-full max-w-md shadow-xl">
-        <CardHeader className="text-center space-y-3">
-          <div className="mx-auto w-16 h-16 rounded-2xl bg-primary text-primary-foreground flex items-center justify-center shadow-lg">
-            <ShoppingCart className="w-8 h-8" />
-          </div>
-          <div>
-            <CardTitle className="text-2xl">POS Pro</CardTitle>
-            <CardDescription>Ventas, Inventario y Punto de Venta</CardDescription>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={onSubmit} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="u">Usuario</Label>
-              <Input id="u" value={username} onChange={(e) => setUsername(e.target.value)} autoFocus autoComplete="username" placeholder="admin / vendedor" />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="p">Contraseña</Label>
-              <div className="relative">
-                <Input id="p" type={show ? 'text' : 'password'} value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" placeholder="••••••••" />
-                <button type="button" onClick={() => setShow((s) => !s)} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
-                  {show ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
-              </div>
-            </div>
-            {error && <div className="text-sm text-destructive bg-destructive/10 rounded-md px-3 py-2">{error}</div>}
-            <Button type="submit" className="w-full" disabled={loading || !username || !password}>
-              {loading ? <><Loader2 className="w-4 h-4 animate-spin" /> Ingresando...</> : 'Ingresar'}
-            </Button>
-            <div className="text-xs text-center text-muted-foreground pt-2 border-t space-y-1">
-              <p><strong>Admin:</strong> admin / admin123</p>
-              <p><strong>Vendedor:</strong> vendedor / vendedor123</p>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
-    </div>
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-surface-container-low via-background to-surface-container p-4 pt-safe pb-safe"><div className="fixed top-3 right-3 z-10"><ThemeToggle compact /></div><Card className="w-full max-w-md shadow-2xl border border-border bg-card/95 backdrop-blur-xl"><CardHeader className="text-center space-y-3 pt-8"><div className="mx-auto w-16 h-16 rounded-2xl bg-primary text-primary-foreground flex items-center justify-center shadow-lg shadow-primary/30"><span className="material-symbols-outlined text-[32px]">point_of_sale</span></div><div><CardTitle className="text-2xl font-bold tracking-tight" style={{ fontFamily: 'var(--font-outfit)' }}>POS Pro</CardTitle><CardDescription>{view === 'login' ? 'Ventas, Inventario y Punto de Venta' : view === 'forgot' ? 'Recuperación de contraseña' : view === 'sent' ? 'Revisa tu correo' : view === 'reset' ? 'Define una nueva contraseña' : 'Contraseña actualizada'}</CardDescription></div></CardHeader><CardContent>
+      {view === 'login' && (<form onSubmit={onSubmit} className="space-y-4"><div className="space-y-2"><Label htmlFor="u">Usuario</Label><Input id="u" value={username} onChange={(e) => setUsername(e.target.value)} autoFocus autoComplete="username" placeholder="Tu usuario" className="h-12" /></div><div className="space-y-2"><Label htmlFor="p">Contraseña</Label><div className="relative"><Input id="p" type={show ? 'text' : 'password'} value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" placeholder="••••••••" className="h-12 pr-10" /><button type="button" onClick={() => setShow((s) => !s)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">{show ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}</button></div></div>{error && (<div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 space-y-1"><div className="text-sm text-destructive flex items-start gap-2"><AlertCircle className="w-4 h-4 mt-0.5 shrink-0" /><span>{error}</span></div>{hint && (<div className="text-xs text-on-surface-variant bg-amber-500/10 border border-amber-500/30 rounded-md px-2 py-1.5 mt-1 flex items-start gap-1.5"><AlertCircle className="w-3 h-3 mt-0.5 shrink-0 text-amber-500" /><span className="whitespace-pre-line">{hint}</span></div>)}</div>)}<Button type="submit" className="w-full h-12 text-base shadow-lg shadow-primary/30" disabled={loading || !username || !password}>{loading ? <><Loader2 className="w-4 h-4 animate-spin" /> Ingresando...</> : 'Ingresar'}</Button><button type="button" onClick={() => { setView('forgot'); setError('') }} className="w-full text-sm text-muted-foreground hover:text-primary text-center mt-2 inline-flex items-center justify-center gap-1.5"><Mail className="w-3.5 h-3.5" /> ¿Olvidaste tu contraseña?</button></form>)}
+      {view === 'forgot' && (<form onSubmit={onForgot} className="space-y-4"><p className="text-sm text-muted-foreground">Ingresa el correo electrónico registrado. Te enviaremos un enlace seguro para restablecer tu contraseña.</p><div className="space-y-2"><Label htmlFor="email">Correo electrónico</Label><Input id="email" type="email" value={forgotEmail} onChange={(e) => setForgotEmail(e.target.value)} autoFocus placeholder="tu@correo.com" className="h-12" /></div>{error && <div className="text-sm text-destructive bg-destructive/10 rounded-md px-3 py-2 flex items-center gap-2"><AlertCircle className="w-4 h-4" />{error}</div>}<Button type="submit" className="w-full h-12" disabled={loading || !forgotEmail}>{loading ? <><Loader2 className="w-4 h-4 animate-spin" /> Enviando...</> : <><Mail className="w-4 h-4 mr-2" /> Enviar enlace</>}</Button><button type="button" onClick={() => { setView('login'); setError('') }} className="w-full text-sm text-muted-foreground hover:text-foreground text-center mt-2 inline-flex items-center justify-center gap-1.5"><ArrowLeft className="w-3.5 h-3.5" /> Volver al inicio de sesión</button></form>)}
+      {view === 'sent' && (<div className="space-y-4 text-center"><div className="mx-auto w-14 h-14 rounded-full bg-secondary-container text-on-secondary-container flex items-center justify-center"><CheckCircle2 className="w-8 h-8" /></div><p className="text-sm">Si el correo <strong className="font-medium">{forgotEmail}</strong> está registrado, recibirá un enlace en breve.</p><p className="text-xs text-muted-foreground">El enlace expira en 1 hora.</p>{resetToken && (<div className="rounded-md bg-tertiary-container border border-tertiary p-3 text-left"><p className="text-xs font-medium text-on-tertiary-container mb-1">Entorno de desarrollo:</p><Button variant="outline" size="sm" className="mt-2 w-full" onClick={() => setView('reset')}><KeyRound className="w-3.5 h-3.5 mr-2" /> Continuar con el token de prueba</Button></div>)}<Button variant="outline" className="w-full" onClick={() => { setView('login'); setForgotEmail(''); setResetToken('') }}><ArrowLeft className="w-4 h-4 mr-2" /> Volver a iniciar sesión</Button></div>)}
+      {view === 'reset' && (<form onSubmit={onReset} className="space-y-4"><div className="space-y-2"><Label htmlFor="token">Token de recuperación</Label><Input id="token" value={resetToken} onChange={(e) => setResetToken(e.target.value)} autoFocus placeholder="Pega aquí el token" className="font-mono text-xs h-12" /></div><div className="space-y-2"><Label htmlFor="np">Nueva contraseña</Label><Input id="np" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="Mínimo 8 caracteres" className="h-12" /></div><div className="space-y-2"><Label htmlFor="cp">Confirmar contraseña</Label><Input id="cp" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="Repite la contraseña" className="h-12" /></div>{error && <div className="text-sm text-destructive bg-destructive/10 rounded-md px-3 py-2 flex items-center gap-2"><AlertCircle className="w-4 h-4" />{error}</div>}<Button type="submit" className="w-full h-12" disabled={loading || !resetToken || !newPassword || !confirmPassword}>{loading ? <><Loader2 className="w-4 h-4 animate-spin" /> Actualizando...</> : <><KeyRound className="w-4 h-4 mr-2" /> Actualizar contraseña</>}</Button></form>)}
+      {view === 'reset-done' && (<div className="space-y-4 text-center"><div className="mx-auto w-14 h-14 rounded-full bg-secondary-container text-on-secondary-container flex items-center justify-center"><CheckCircle2 className="w-8 h-8" /></div><p className="text-sm">{resetMessage}</p><Button className="w-full h-12" onClick={() => { setView('login'); setNewPassword(''); setConfirmPassword(''); setResetToken('') }}>Ir a iniciar sesión</Button></div>)}
+    </CardContent></Card></div>
   )
 }
