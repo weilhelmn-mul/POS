@@ -1,15 +1,13 @@
 import { db } from '@/lib/db'
 import type { DatabaseConfig } from '@/lib/database-config'
 import { getSupabase } from '@/lib/supabase-client'
-import { getFirebase } from '@/lib/firebase-client'
+import { getFirebase, ensureFirebaseAuth } from '@/lib/firebase-client'
 
 /**
  * Servicio de sincronización entre SQLite local y la nube (Supabase/Firebase).
  *
- * Estrategia: last-write-wins basado en updatedAt.
- * - upload: lee datos locales y los sube a la nube
- * - download: lee datos de la nube y los guarda localmente
- * - sync: bidireccional (upload + download)
+ * Para Firebase: se autentica con Firebase Auth (admin@pos-creard.com por defecto)
+ * antes de cualquier operación de lectura/escritura en Firestore.
  */
 
 interface SyncResult {
@@ -18,11 +16,26 @@ interface SyncResult {
   downloaded: number
   errors: string[]
   perCollection?: Record<string, { uploaded: number; downloaded: number }>
+  authUid?: string
 }
 
 export async function syncToCloud(config: DatabaseConfig, direction: 'upload' | 'download' | 'both' = 'both'): Promise<SyncResult> {
   const result: SyncResult = { ok: true, uploaded: 0, downloaded: 0, errors: [], perCollection: {} }
   const collections = config.syncCollections || []
+
+  // Pre-autenticar con Firebase si el provider es firebase
+  if (config.provider === 'firebase' && config.firebaseConfig?.apiKey) {
+    const email = config.firebaseAuthEmail || 'admin@pos-creard.com'
+    const password = config.firebaseAuthPassword || 'admin123'
+    try {
+      const uid = await ensureFirebaseAuth(config.firebaseConfig, email, password)
+      result.authUid = uid
+    } catch (e: any) {
+      result.errors.push(`Firebase Auth: ${(e as Error).message}`)
+      result.ok = false
+      return result
+    }
+  }
 
   for (const collection of collections) {
     try {
@@ -89,20 +102,33 @@ async function syncFirebase(collection: string, config: DatabaseConfig, directio
     result.ok = false
     return result
   }
-  const { db: fs } = await getFirebase(config.firebaseConfig)
+  const { db: fs, auth: authInstance } = await getFirebase(config.firebaseConfig)
   const { collection: col, getDocs, writeBatch, doc } = await import('firebase/firestore')
   const colRef = col(fs, collection)
+  const syncTs = new Date().toISOString()
 
   // UPLOAD
   if (direction === 'upload' || direction === 'both') {
     const localData = await readLocal(collection)
     if (localData.length) {
-      const batch = writeBatch(fs)
-      for (const item of localData) {
-        const docRef = doc(colRef, item.id)
-        batch.set(docRef, item, { merge: true })
+      const BATCH_SIZE = 400
+      let processed = 0
+      while (processed < localData.length) {
+        const slice = localData.slice(processed, processed + BATCH_SIZE)
+        const batch = writeBatch(fs)
+        for (const item of slice) {
+          if (!item.id || typeof item.id !== 'string') continue
+          const docRef = doc(colRef, item.id)
+          item.source = 'pos-desktop'
+          item.syncStatus = 'synced'
+          item.externalId = item.externalId || item.id
+          item.syncedAt = syncTs
+          item.syncedBy = authInstance?.currentUser?.uid || 'unknown'
+          batch.set(docRef, item, { merge: true })
+        }
+        await batch.commit()
+        processed += slice.length
       }
-      await batch.commit()
       result.uploaded = localData.length
     }
   }

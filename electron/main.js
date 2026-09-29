@@ -309,7 +309,7 @@ if (!gotLock) {
       logDiag(`[main] ERROR FATAL: ${msg}`)
       dialog.showErrorBox(
         'Error al iniciar POS Pro',
-        msg + '\n\n---\nSi el problema persiste:\n1. Verifica que ningún antivirus bloquee la app\n2. Instala Visual C++ Redistributable 2015-2022 x64 (https://aka.ms/vs/17/release/vc_redist.x64.exe)\n3. Cierra instancias previas de POS Pro\n4. Revisa el log en: ' + path.join(app.getPath('userData'), 'pos-pro.log'))
+        msg + '\n\n---\nSi el problema persiste:\n1. Verifica que ningún antivirus bloquee la app\n2. Instala Visual C++ Redistributable 2015-2022 x64 (https://aka.ms/vs/17/release/vc_redist.x64.exe)\n3. Cierra instancias previas de POS Pro\n4. Revisa el log en: ' + path.join(app.getPath('userData'), 'pos-pro.log')
       )
       app.quit()
     }

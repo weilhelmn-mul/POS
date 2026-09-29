@@ -13,7 +13,7 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Plus, Search, ScanLine, Trash2, ShoppingCart, UserRound, X, Printer, Pause, Ban, Tag, CreditCard, Minus } from 'lucide-react'
+import { Plus, Search, ScanLine, Trash2, ShoppingCart, UserRound, X, Printer, Pause, Ban, Tag, CreditCard, Minus, UserPlus, Loader2, AlertCircle } from 'lucide-react'
 import { toast } from 'sonner'
 import type { CartItem, PaymentSplit, ProductWithStatus } from '@/types'
 
@@ -276,23 +276,203 @@ function CustomerPicker({ customers, selectedId, onClose, onPick }: {
   customers: Array<{ id: string; name: string; document: string | null; creditBalance: number; creditLimit: number }>
   selectedId: string | null; onClose: () => void; onPick: (c: { id: string; name: string } | null) => void
 }) {
+  const qc = useQueryClient()
   const [q, setQ] = useState('')
+  const [showForm, setShowForm] = useState(false)
+  const [creating, setCreating] = useState(false)
+  const [formErr, setFormErr] = useState<string | null>(null)
+  const [form, setForm] = useState({
+    name: '', document: '', phone: '', email: '', address: '', creditLimit: '0', notes: '',
+  })
+
   const filtered = customers.filter((c) => c.name.toLowerCase().includes(q.toLowerCase()) || (c.document || '').includes(q))
+
+  const handleCreate = async () => {
+    setFormErr(null)
+    if (!form.name.trim()) {
+      setFormErr('El nombre del cliente es obligatorio')
+      return
+    }
+    setCreating(true)
+    try {
+      const payload: Record<string, unknown> = {
+        name: form.name.trim(),
+        document: form.document.trim() || null,
+        phone: form.phone.trim() || null,
+        email: form.email.trim() || null,
+        address: form.address.trim() || null,
+        creditLimit: Number(form.creditLimit) || 0,
+        notes: form.notes.trim() || null,
+      }
+      const res = await apiFetch<{ customer: { id: string; name: string } }>('/api/customers', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      })
+      // Refrescar la lista de clientes en cache
+      qc.invalidateQueries({ queryKey: ['customers'] })
+      toast.success(`Cliente "${res.customer.name}" registrado`)
+      // Seleccionar el nuevo cliente automáticamente y cerrar el picker
+      onPick({ id: res.customer.id, name: res.customer.name })
+    } catch (e: any) {
+      const msg = (e as Error).message || 'Error al crear cliente'
+      setFormErr(msg)
+      toast.error(msg)
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  const resetForm = () => {
+    setForm({ name: '', document: '', phone: '', email: '', address: '', creditLimit: '0', notes: '' })
+    setFormErr(null)
+  }
+
   return (
     <div className="fixed inset-0 z-50">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="absolute right-0 top-0 h-full w-80 bg-card border-l p-3 flex flex-col">
-        <div className="flex items-center justify-between mb-2"><span className="font-semibold">Cliente</span><Button variant="ghost" size="icon" onClick={onClose}><X className="w-4 h-4" /></Button></div>
-        <Input placeholder="Buscar cliente..." value={q} onChange={(e) => setQ(e.target.value)} className="mb-2" />
-        <ScrollArea className="flex-1">
-          <button onClick={() => onPick(null)} className="w-full text-left p-2 hover:bg-accent rounded text-sm border mb-1">Consumidor final</button>
-          {filtered.map((c) => (
-            <button key={c.id} onClick={() => onPick(c)} className={`w-full text-left p-2 hover:bg-accent rounded text-sm border mb-1 ${selectedId === c.id ? 'border-primary bg-primary/5' : ''}`}>
-              <div className="font-medium">{c.name}</div>
-              <div className="text-xs text-muted-foreground">{c.document || '—'} {c.creditBalance > 0 && <span className="text-red-500">· Debe {formatCurrency(c.creditBalance)}</span>}</div>
-            </button>
-          ))}
-        </ScrollArea>
+      <div className="absolute right-0 top-0 h-full w-80 max-w-[85vw] bg-card border-l p-3 flex flex-col">
+        <div className="flex items-center justify-between mb-2">
+          <span className="font-semibold">{showForm ? 'Nuevo cliente' : 'Cliente'}</span>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => { showForm ? (setShowForm(false), resetForm()) : onClose() }}
+          >
+            <X className="w-4 h-4" />
+          </Button>
+        </div>
+
+        {showForm ? (
+          // ─── Formulario inline de nuevo cliente ───
+          <div className="flex flex-col gap-2 overflow-y-auto scroll-thin pb-2">
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground">Nombre *</label>
+              <Input
+                placeholder="Nombre completo o razón social"
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                autoFocus
+                disabled={creating}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground">Documento (DNI/RUC)</label>
+              <Input
+                placeholder="12345678 o 20123456789"
+                value={form.document}
+                onChange={(e) => setForm({ ...form, document: e.target.value })}
+                disabled={creating}
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-muted-foreground">Teléfono</label>
+                <Input
+                  placeholder="999 888 777"
+                  value={form.phone}
+                  onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                  disabled={creating}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-muted-foreground">Límite crédito</label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  placeholder="0.00"
+                  value={form.creditLimit}
+                  onChange={(e) => setForm({ ...form, creditLimit: e.target.value })}
+                  disabled={creating}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground">Email</label>
+              <Input
+                type="email"
+                placeholder="cliente@email.com"
+                value={form.email}
+                onChange={(e) => setForm({ ...form, email: e.target.value })}
+                disabled={creating}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground">Dirección</label>
+              <Input
+                placeholder="Av. Principal 123"
+                value={form.address}
+                onChange={(e) => setForm({ ...form, address: e.target.value })}
+                disabled={creating}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground">Notas</label>
+              <Input
+                placeholder="Observaciones internas (opcional)"
+                value={form.notes}
+                onChange={(e) => setForm({ ...form, notes: e.target.value })}
+                disabled={creating}
+              />
+            </div>
+
+            {formErr && (
+              <div className="flex items-start gap-2 rounded-lg bg-destructive/10 p-2 text-xs text-destructive">
+                <AlertCircle className="mt-0.5 size-3 shrink-0" />
+                <span>{formErr}</span>
+              </div>
+            )}
+
+            <div className="flex gap-2 pt-1">
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={() => { setShowForm(false); resetForm() }}
+                disabled={creating}
+              >
+                Cancelar
+              </Button>
+              <Button
+                className="flex-1"
+                onClick={handleCreate}
+                disabled={creating || !form.name.trim()}
+              >
+                {creating ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <UserPlus className="w-4 h-4 mr-1" />}
+                Guardar y seleccionar
+              </Button>
+            </div>
+
+            <p className="text-[10px] text-muted-foreground text-center pt-1">
+              El cliente quedará seleccionado automáticamente en la venta actual.
+            </p>
+          </div>
+        ) : (
+          // ─── Lista de clientes (modo original) ───
+          <>
+            <Button
+              variant="outline"
+              className="w-full mb-2 border-dashed justify-start text-sm"
+              onClick={() => setShowForm(true)}
+            >
+              <UserPlus className="w-4 h-4 mr-2 text-emerald-600" />
+              Agregar nuevo cliente
+            </Button>
+            <Input placeholder="Buscar cliente..." value={q} onChange={(e) => setQ(e.target.value)} className="mb-2" />
+            <ScrollArea className="flex-1">
+              <button onClick={() => onPick(null)} className="w-full text-left p-2 hover:bg-accent rounded text-sm border mb-1">Consumidor final</button>
+              {filtered.map((c) => (
+                <button key={c.id} onClick={() => onPick(c)} className={`w-full text-left p-2 hover:bg-accent rounded text-sm border mb-1 ${selectedId === c.id ? 'border-primary bg-primary/5' : ''}`}>
+                  <div className="font-medium">{c.name}</div>
+                  <div className="text-xs text-muted-foreground">{c.document || '—'} {c.creditBalance > 0 && <span className="text-red-500">· Debe {formatCurrency(c.creditBalance)}</span>}</div>
+                </button>
+              ))}
+            </ScrollArea>
+          </>
+        )}
       </div>
     </div>
   )

@@ -16,7 +16,7 @@ import { Store, Palette, Save, Upload, Database, Cloud, CloudUpload, CloudDownlo
 import { toast } from 'sonner'
 import type { BusinessSettings } from '@/lib/settings'
 import type { DatabaseConfig, DatabaseProvider } from '@/lib/database-config'
-import { SYNC_COLLECTIONS, DEFAULT_DB_CONFIG } from '@/lib/database-config'
+import { SYNC_COLLECTIONS, SYNC_INTERVAL_OPTIONS, DEFAULT_DB_CONFIG } from '@/lib/database-config'
 
 const THEMES = [
   { value: 'light', label: 'Claro', color: 'bg-white border' },
@@ -139,8 +139,9 @@ function DatabaseConfigPanel() {
   const [saving, setSaving] = useState(false)
   const [testing, setTesting] = useState<'supabase' | 'firebase' | null>(null)
   const [testResult, setTestResult] = useState<Record<string, { ok: boolean; error?: string } | null>>({})
-  const [syncing, setSyncing] = useState<'upload' | 'download' | 'both' | null>(null)
+  const [syncing, setSyncing] = useState<'upload' | 'download' | 'both' | 'auto' | null>(null)
   const [syncResult, setSyncResult] = useState<{ uploaded: number; downloaded: number; errors: string[] } | null>(null)
+  const [nextSyncInSec, setNextSyncInSec] = useState<number | null>(null)
 
   useEffect(() => {
     apiFetch<{ config: DatabaseConfig; hasCredentials: { supabase: boolean; firebase: boolean } }>('/api/config/database').then((d) => {
@@ -149,6 +150,66 @@ function DatabaseConfigPanel() {
       setLoading(false)
     })
   }, [])
+
+  // Auto-sync: arrancar intervalo cuando autoSync está activo y el provider no es local
+  useEffect(() => {
+    if (!config.autoSync || config.provider === 'local' || !config.syncCollections?.length) {
+      setNextSyncInSec(null)
+      return
+    }
+    const minutes = config.syncIntervalMin || 5
+    const totalSec = Math.max(60, minutes * 60)
+    let remaining = totalSec
+    setNextSyncInSec(remaining)
+
+    const ticker = setInterval(() => {
+      remaining -= 1
+      if (remaining < 0) remaining = totalSec
+      setNextSyncInSec(remaining)
+    }, 1000)
+
+    const fireSync = () => {
+      setSyncing((cur) => cur ? cur : 'auto')
+    }
+    const syncInterval = setInterval(fireSync, totalSec * 1000)
+
+    return () => {
+      clearInterval(ticker)
+      clearInterval(syncInterval)
+      setNextSyncInSec(null)
+    }
+  }, [config.autoSync, config.syncIntervalMin, config.provider, config.syncCollections?.length])
+
+  // Ejecutor real de auto-sync
+  useEffect(() => {
+    if (syncing !== 'auto') return
+    let cancelled = false
+    ;(async () => {
+      setSyncResult(null)
+      try {
+        const res = await apiFetch<{ ok: boolean; uploaded: number; downloaded: number; errors: string[]; perCollection?: Record<string, { uploaded: number; downloaded: number }> }>(`/api/config/sync`, {
+          method: 'POST',
+          body: JSON.stringify({ direction: 'upload' }),
+        })
+        if (cancelled) return
+        setSyncResult({ uploaded: res.uploaded, downloaded: res.downloaded, errors: res.errors })
+        if (res.ok) {
+          if (res.uploaded > 0) toast.success(`Auto-sync: ${res.uploaded} registros subidos`)
+        } else {
+          toast.error(`Auto-sync falló: ${res.errors.length} error(es)`)
+        }
+        try {
+          const d = await apiFetch<{ config: DatabaseConfig }>('/api/config/database')
+          if (!cancelled) setConfig(d.config)
+        } catch {}
+      } catch (e) {
+        if (!cancelled) toast.error(`Auto-sync error: ${(e as Error).message}`)
+      } finally {
+        if (!cancelled) setSyncing(null)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [syncing])
 
   const save = async () => {
     setSaving(true)
@@ -367,12 +428,58 @@ function DatabaseConfigPanel() {
             </div>
 
             {/* Sincronización automática */}
-            <div className="flex items-center justify-between p-3 border rounded-lg">
-              <div>
-                <Label className="cursor-pointer">Sincronización automática</Label>
-                <p className="text-xs text-muted-foreground mt-0.5">Subir cambios automáticamente cada 5 minutos</p>
+            <div className="space-y-3 p-3 border rounded-lg">
+              <div className="flex items-center justify-between">
+                <div className="flex-1">
+                  <Label className="cursor-pointer">Sincronización automática</Label>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Subir cambios automáticamente cada {config.syncIntervalMin || 5} minutos
+                  </p>
+                </div>
+                <Switch
+                  checked={config.autoSync || false}
+                  onCheckedChange={(v) => setConfig({ ...config, autoSync: v })}
+                />
               </div>
-              <Switch checked={config.autoSync} onCheckedChange={(v) => setConfig({ ...config, autoSync: v })} />
+
+              <div className="flex items-center gap-3 pt-2 border-t">
+                <Label className="text-xs shrink-0">Frecuencia</Label>
+                <Select
+                  value={String(config.syncIntervalMin || 5)}
+                  onValueChange={(v) => setConfig({ ...config, syncIntervalMin: parseInt(v, 10) })}
+                  disabled={!config.autoSync}
+                >
+                  <SelectTrigger className="h-8 text-xs flex-1">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SYNC_INTERVAL_OPTIONS.map((opt) => (
+                      <SelectItem key={opt.value} value={String(opt.value)} className="text-xs">
+                        <div className="flex flex-col">
+                          <span>{opt.label}</span>
+                          <span className="text-[10px] text-muted-foreground">{opt.hint}</span>
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {config.autoSync && nextSyncInSec !== null && (
+                <div className="flex items-center gap-2 text-xs text-muted-foreground pt-1">
+                  <Zap className="w-3 h-3 text-emerald-500" />
+                  {syncing === 'auto' ? (
+                    <span className="flex items-center gap-1.5 text-emerald-600">
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                      Sincronizando...
+                    </span>
+                  ) : (
+                    <span>
+                      Próxima subida en <strong className="text-foreground">{Math.floor(nextSyncInSec / 60)}:{String(nextSyncInSec % 60).padStart(2, '0')}</strong> min
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Botones de sincronización */}
