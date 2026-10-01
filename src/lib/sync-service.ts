@@ -118,12 +118,30 @@ async function syncFirebase(collection: string, config: DatabaseConfig, directio
         const batch = writeBatch(fs)
         for (const item of slice) {
           if (!item.id || typeof item.id !== 'string') continue
-          const docRef = doc(colRef, item.id)
+          // ── Aplanar relaciones para que la web admin pueda mostrar nombre del cliente y vendedor
+          // sin tener que hacer JOIN con colección customers/users
+          if (collection === 'sales') {
+            const c = item.customer as any
+            if (c && typeof c === 'object') {
+              item.customerName = c.name || item.customerName
+              item.customerDoc = c.document || item.customerDoc
+              // Eliminar el objeto embebido para no duplicar datos en Firestore
+              // (la web ya hace lookup por customerId si necesita el resto)
+              delete item.customer
+            }
+            const u = item.user as any
+            if (u && typeof u === 'object') {
+              item.userName = u.username || u.name || item.userName
+              delete item.user
+            }
+          }
+          // ── Metadatos de sincronización
           item.source = 'pos-desktop'
           item.syncStatus = 'synced'
           item.externalId = item.externalId || item.id
           item.syncedAt = syncTs
           item.syncedBy = authInstance?.currentUser?.uid || 'unknown'
+          const docRef = doc(colRef, item.id)
           batch.set(docRef, item, { merge: true })
         }
         await batch.commit()
@@ -155,7 +173,16 @@ async function readLocal(collection: string): Promise<Record<string, unknown>[]>
     case 'customers':
       return await db.customer.findMany() as unknown as Record<string, unknown>[]
     case 'sales':
-      return await db.sale.findMany({ include: { items: true, payments: true } }) as unknown as Record<string, unknown>[]
+      // Incluir customer y user (vendedor) para que Firebase tenga customerName y userName
+      // Resuelve el problema de la web admin que no podía mostrar el nombre del cliente
+      return await db.sale.findMany({
+        include: {
+          items: true,
+          payments: true,
+          customer: { select: { id: true, name: true, document: true, phone: true, email: true, address: true } },
+          user: { select: { id: true, username: true, name: true } },
+        },
+      }) as unknown as Record<string, unknown>[]
     case 'categories':
       return await db.category.findMany() as unknown as Record<string, unknown>[]
     case 'suppliers':
