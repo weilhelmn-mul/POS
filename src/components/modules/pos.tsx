@@ -148,7 +148,7 @@ export default function Pos() {
   return (
     <div className="flex h-[calc(100vh-4rem)]">
       {/* Productos */}
-      <div className={cn('flex flex-col min-w-0 border-r transition-[width] duration-200', productsCollapsed ? 'w-0 overflow-hidden' : 'flex-1')}>
+      <div className={cn('flex flex-col min-w-0 border-r transition-[width] duration-200', productsCollapsed ? 'w-12 shrink-0' : 'flex-1')}>
         {productsCollapsed ? (
           <button onClick={() => toggleProductsCollapsed()} className="w-12 h-full flex items-center justify-center border-r bg-card hover:bg-accent" title="Mostrar productos">
             <PanelLeftOpen className="w-4 h-4" />
