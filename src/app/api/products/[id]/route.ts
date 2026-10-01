@@ -56,7 +56,32 @@ export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: str
   const r = await requirePermission('products.delete')
   if ('error' in r) return r.error
   const { id } = await ctx.params
-  await db.product.delete({ where: { id } })
-  await logAudit({ user: r.user, action: 'delete', entity: 'product', entityId: id })
+  // Obtener el producto antes de intentar eliminar (para soft-delete fallback)
+  const before = await db.product.findUnique({ where: { id } })
+  if (!before) return errorJson('Producto no encontrado', 404)
+  try {
+    // Intentar eliminación física
+    await db.product.delete({ where: { id } })
+    await logAudit({ user: r.user, action: 'delete', entity: 'product', entityId: id, oldValue: before })
+  } catch (e: any) {
+    // P2003 = Foreign key constraint failed (producto referenciado por SaleItem/PurchaseItem)
+    if (e?.code === 'P2003' || e?.code === 'P2014') {
+      // Soft-delete: marcar como discontinued para preservar integridad referencial
+      // El producto desaparece de la lista (GET filtra status='discontinued')
+      // pero las ventas históricas siguen mostrando su nombre (snapshot en SaleItem.name)
+      await db.product.update({
+        where: { id },
+        data: {
+          status: 'discontinued',
+          isFavorite: false,
+          // Limpiar barcode para permitir reutilizarlo en otros productos
+          barcode: null,
+        },
+      })
+      await logAudit({ user: r.user, action: 'delete', entity: 'product', entityId: id, oldValue: before, newValue: { status: 'discontinued', note: 'soft-delete por FK constraint' } })
+    } else {
+      throw e
+    }
+  }
   return json({ ok: true })
 }

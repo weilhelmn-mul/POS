@@ -19,6 +19,11 @@ export async function GET(req: NextRequest) {
 
   const business = await getBusiness()
   const where: Record<string, unknown> = {}
+  // Filtrar productos eliminados (soft-delete) por defecto
+  // Solo se muestran si el cliente pasa ?includeDiscontinued=1
+  if (searchParams.get('includeDiscontinued') !== '1') {
+    where.status = { not: 'discontinued' }
+  }
   if (q) {
     where.OR = [
       { name: { contains: q } },
