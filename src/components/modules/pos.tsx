@@ -13,8 +13,11 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Plus, Search, ScanLine, Trash2, ShoppingCart, UserRound, X, Printer, Pause, Ban, Tag, CreditCard, Minus, UserPlus, Loader2, AlertCircle } from 'lucide-react'
+import { Plus, Search, ScanLine, Trash2, ShoppingCart, UserRound, X, Printer, Pause, Ban, Tag, CreditCard, Minus, UserPlus, Loader2, AlertCircle, PanelRightClose, PanelRightOpen, PanelLeftClose, PanelLeftOpen, Zap, Wifi, WifiOff, Loader2 as Spinner } from 'lucide-react'
 import { toast } from 'sonner'
+import { triggerGlobalSync } from '@/hooks/use-global-sync'
+import { useUI } from '@/store/ui'
+import { cn } from '@/lib/utils'
 import type { CartItem, PaymentSplit, ProductWithStatus } from '@/types'
 
 export default function Pos() {
@@ -22,6 +25,7 @@ export default function Pos() {
   const { business } = useBusiness()
   const currency = business?.currency || 'S/'
   const { sales, activeId, active, newSale, selectSale, closeSale, addItem, updateQty, updatePrice, removeItem, setCustomer, setDiscount, clearActive, setObservations } = useCart()
+  const { productsCollapsed, toggleProductsCollapsed, cartCollapsed, toggleCartCollapsed, scannerEnabled, toggleScanner } = useUI()
   const [q, setQ] = useState('')
   const [cat, setCat] = useState('all')
   const [showFav, setShowFav] = useState(false)
@@ -100,6 +104,8 @@ export default function Pos() {
   // Soporte para lector USB (simula tipeo rápido + Enter) cuando el input de búsqueda está enfocado
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // 🔥 Si el lector está apagado, no procesar códigos
+      if (!scannerEnabled) return
       if (e.key === 'Enter' && document.activeElement === searchRef.current && q) {
         const found = (products?.products || []).find((p) => p.barcode === q || p.internalCode === q)
         if (found) { addToCart(found); setQ('') }
@@ -107,7 +113,7 @@ export default function Pos() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [q, products])
+  }, [q, products, scannerEnabled])
 
   const confirmSale = async (splits: PaymentSplit[], method: string) => {
     if (!activeSale || items.length === 0) { toast.error('Carrito vacío'); return }
@@ -132,6 +138,8 @@ export default function Pos() {
       setPrintSale(res.sale)
       qc.invalidateQueries({ queryKey: ['dashboard'] })
       qc.invalidateQueries({ queryKey: ['products'] })
+      // 🔥 Trigger sync inmediato a Firebase (no esperar al auto-sync de N minutos)
+      triggerGlobalSync()
     } catch (e) {
       toast.error((e as Error).message)
     }
@@ -140,16 +148,27 @@ export default function Pos() {
   return (
     <div className="flex h-[calc(100vh-4rem)]">
       {/* Productos */}
-      <div className="flex-1 flex flex-col min-w-0 border-r">
-        <div className="p-3 space-y-2 border-b">
-          <div className="flex gap-2">
-            <div className="relative flex-1">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input ref={searchRef} placeholder="Buscar o escanear código..." value={q} onChange={(e) => setQ(e.target.value)} className="pl-8 pr-2" autoFocus />
-            </div>
-            <Button variant="outline" size="icon" onClick={() => setScannerOpen(true)} title="Escanear con cámara"><ScanLine className="w-5 h-5" /></Button>
-          </div>
-          <div className="flex gap-2 overflow-x-auto scroll-thin pb-1">
+      <div className={cn('flex flex-col min-w-0 border-r transition-[width] duration-200', productsCollapsed ? 'w-0 overflow-hidden' : 'flex-1')}>
+        {productsCollapsed ? (
+          <button onClick={() => toggleProductsCollapsed()} className="w-12 h-full flex items-center justify-center border-r bg-card hover:bg-accent" title="Mostrar productos">
+            <PanelLeftOpen className="w-4 h-4" />
+          </button>
+        ) : (
+          <>
+            <div className="p-3 space-y-2 border-b">
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <Input ref={searchRef} placeholder="Buscar o escanear código..." value={q} onChange={(e) => setQ(e.target.value)} className="pl-8 pr-2" autoFocus />
+                </div>
+                {/* Scanner ON/OFF + LED */}
+                <ScannerToggle enabled={scannerEnabled} onToggle={toggleScanner} />
+                <Button variant="outline" size="icon" onClick={() => setScannerOpen(true)} title="Escanear con cámara"><ScanLine className="w-5 h-5" /></Button>
+                <Button variant="ghost" size="icon" onClick={() => toggleProductsCollapsed()} title="Plegar productos">
+                  <PanelLeftClose className="w-5 h-5" />
+                </Button>
+              </div>
+              <div className="flex gap-2 overflow-x-auto scroll-thin pb-1">
             <Button size="sm" variant={cat === 'all' ? 'default' : 'outline'} onClick={() => setCat('all')}>Todos</Button>
             <Button size="sm" variant={showFav ? 'secondary' : 'outline'} onClick={() => setShowFav((v) => !v)}>★ Favoritos</Button>
             {(cats?.categories || []).map((c) => (
@@ -180,12 +199,45 @@ export default function Pos() {
             {filtered.length === 0 && <div className="col-span-full text-center text-muted-foreground py-10 text-sm">No hay productos</div>}
           </div>
         </ScrollArea>
+          </>
+        )}
       </div>
 
       {/* Carrito */}
-      <div className="w-full max-w-md flex flex-col bg-card">
-        {/* Tabs de ventas abiertas */}
-        <div className="flex gap-1 p-2 border-b overflow-x-auto scroll-thin">
+      <div className={cn('flex flex-col bg-card transition-[width] duration-200', cartCollapsed ? 'w-44' : 'w-full max-w-md')}>
+        {/* Header carrito con botón plegar */}
+        {cartCollapsed ? (
+          <div className="flex flex-col h-full p-2 gap-3 items-center justify-between">
+            <button onClick={() => toggleCartCollapsed()} className="w-full flex items-center justify-center gap-1 text-xs text-muted-foreground hover:text-foreground" title="Desplegar carrito">
+              <PanelRightOpen className="w-4 h-4" />
+            </button>
+            <div className="flex-1 flex flex-col items-center justify-center gap-2">
+              <div className="relative">
+                <ShoppingCart className="w-8 h-8 text-muted-foreground" />
+                {items.length > 0 && <span className="absolute -top-1 -right-2 bg-primary text-primary-foreground text-[10px] font-bold rounded-full px-1.5 py-0.5 min-w-5 text-center">{items.length}</span>}
+              </div>
+              <span className="text-[10px] text-muted-foreground text-center leading-tight">
+                {items.length === 0 ? 'Vacío' : `${items.length} prod.`}
+              </span>
+              {items.length > 0 && (
+                <span className="text-sm font-bold text-center">{formatCurrency(total, currency)}</span>
+              )}
+            </div>
+            <Button onClick={() => setPayOpen(true)} disabled={!items.length} size="sm" className="w-full h-9 p-0">
+              <CreditCard className="w-4 h-4" />
+            </Button>
+            <button onClick={() => toggleCartCollapsed()} className="text-[10px] text-muted-foreground hover:text-foreground" title="Desplegar">⤢</button>
+          </div>
+        ) : (
+          <>
+            <div className="flex items-center justify-between p-2 border-b">
+              <span className="text-xs font-semibold text-muted-foreground">{items.length} producto(s) · {formatCurrency(total, currency)}</span>
+              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => toggleCartCollapsed()} title="Plegar carrito">
+                <PanelRightClose className="w-4 h-4" />
+              </Button>
+            </div>
+            {/* Tabs de ventas abiertas */}
+            <div className="flex gap-1 p-2 border-b overflow-x-auto scroll-thin">
           {sales.map((s) => (
             <button key={s.id} onClick={() => selectSale(s.id)} className={`px-2.5 py-1 rounded-md text-xs whitespace-nowrap border ${s.id === activeId ? 'bg-primary text-primary-foreground border-primary' : 'hover:bg-accent'}`}>
               {s.customerName}
@@ -207,7 +259,13 @@ export default function Pos() {
         {/* Items */}
         <ScrollArea className="flex-1">
           <div className="p-2 space-y-1">
-            {items.length === 0 && <div className="text-center text-muted-foreground py-12 text-sm"><ShoppingCart className="w-10 h-10 mx-auto mb-2 opacity-30" />Carrito vacío</div>}
+            {items.length === 0 && (
+              <button onClick={() => searchRef.current?.focus()} className="w-full text-center text-muted-foreground py-12 text-sm hover:bg-accent rounded-lg transition-colors cursor-pointer">
+                <ShoppingCart className="w-10 h-10 mx-auto mb-2 opacity-30" />
+                <p className="font-medium">Carrito vacío</p>
+                <p className="text-[10px] mt-1 text-primary">Clic aquí para buscar producto</p>
+              </button>
+            )}
             {items.map((it) => (
               <div key={it.productId} className="flex gap-2 p-2 rounded-md border bg-background">
                 <div className="w-10 h-10 rounded bg-muted/40 flex items-center justify-center shrink-0 overflow-hidden">
@@ -250,6 +308,8 @@ export default function Pos() {
             <Button variant="outline" disabled={!items.length} onClick={() => clearActive()}><Ban className="w-4 h-4 mr-1" />Cancelar</Button>
           </div>
         </div>
+          </>
+        )}
       </div>
 
       <Scanner open={scannerOpen} onClose={() => setScannerOpen(false)} onScan={handleScan} />
@@ -492,5 +552,63 @@ function DiscountDialog({ current, onClose, onSet }: { current: number; onClose:
         </div>
       </div>
     </div>
+  )
+}
+
+/**
+ * Botón toggle del lector de código de barras con LED indicador de estado.
+ *
+ * Estados:
+ * - ON + online: LED verde "CONECTADO" (parpadea cuando recibe input)
+ * - ON + offline: LED ámbar "DESCONECTADO"
+ * - OFF: LED gris "APAGADO"
+ */
+function ScannerToggle({ enabled, onToggle }: { enabled: boolean; onToggle: () => void }) {
+  const [online, setOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true)
+  const [recentlyScanned, setRecentlyScanned] = useState(false)
+
+  useEffect(() => {
+    const onOnline = () => setOnline(true)
+    const onOffline = () => setOnline(false)
+    window.addEventListener('online', onOnline)
+    window.addEventListener('offline', onOffline)
+    return () => {
+      window.removeEventListener('online', onOnline)
+      window.removeEventListener('offline', onOffline)
+    }
+  }, [])
+
+  // LED color depending on state
+  let ledColor = 'bg-muted-foreground'
+  let ledLabel = 'APAGADO'
+  let ledTitle = 'Lector apagado'
+  if (enabled) {
+    if (online) {
+      ledColor = recentlyScanned ? 'bg-emerald-400' : 'bg-emerald-500'
+      ledLabel = 'CONECTADO'
+      ledTitle = 'Lector conectado y activo'
+    } else {
+      ledColor = 'bg-amber-500'
+      ledLabel = 'DESCONECTADO'
+      ledTitle = 'Sin conexión a Internet'
+    }
+  }
+
+  return (
+    <button
+      onClick={onToggle}
+      title={ledTitle}
+      className={cn(
+        'flex items-center gap-1.5 h-9 px-2 rounded-md border text-xs font-medium transition-colors',
+        enabled
+          ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
+          : 'border-input bg-background text-muted-foreground hover:bg-accent'
+      )}
+    >
+      {/* LED */}
+      <span className={cn('size-2 rounded-full transition-colors', ledColor, enabled && online && 'animate-pulse-soft')} />
+      <span className="hidden sm:inline">{ledLabel}</span>
+      <ScanLine className={cn('w-4 h-4', !enabled && 'opacity-50')} />
+    </button>
   )
 }

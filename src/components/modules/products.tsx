@@ -21,6 +21,7 @@ import { STATUS_META, formatCurrency, formatDate } from '@/lib/product-status'
 import type { ProductWithStatus } from '@/types'
 import { Plus, Search, Pencil, Trash2, Printer, Upload, RefreshCw, QrCode, Package } from 'lucide-react'
 import { toast } from 'sonner'
+import { triggerGlobalSync } from '@/hooks/use-global-sync'
 
 interface Cat { id: string; name: string; children?: Cat[] }
 interface Brand { id: string; name: string }
@@ -228,6 +229,8 @@ function ProductForm({ product, categories, brands, suppliers, onClose, onSaved 
         toast.success('Producto creado')
       }
       onSaved()
+      // 🔥 Sincronizar inmediatamente a Firebase
+      triggerGlobalSync()
     } catch (e) { toast.error((e as Error).message) } finally { setSaving(false) }
   }
 

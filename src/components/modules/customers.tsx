@@ -13,6 +13,7 @@ import { apiFetch } from '@/lib/hooks'
 import { formatCurrency, formatDate } from '@/lib/product-status'
 import { Plus, Search, Pencil, Trash2, Users, Phone, Mail } from 'lucide-react'
 import { toast } from 'sonner'
+import { triggerGlobalSync } from '@/hooks/use-global-sync'
 
 export default function Customers() {
   const has = useAuth((s) => s.has)
@@ -93,6 +94,8 @@ function CustomerDialog({ customer, trigger, onSaved }: { customer?: { id: strin
       else await apiFetch('/api/customers', { method: 'POST', body: JSON.stringify(form) })
       toast.success(customer ? 'Cliente actualizado' : 'Cliente creado')
       onSaved(); setOpen(false)
+      // 🔥 Sincronizar inmediatamente a Firebase
+      triggerGlobalSync()
     } catch (e) { toast.error((e as Error).message) } finally { setSaving(false) }
   }
 

@@ -6,6 +6,7 @@ import { useBusiness } from '@/lib/hooks'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { ThemeToggle } from './theme-toggle'
+import { SyncIndicator } from './sync-indicator'
 import { PackageX, AlertTriangle, CalendarClock, AlertCircle, Menu, Bell } from 'lucide-react'
 import { NAV_ITEMS } from './nav'
 import { useMemo } from 'react'
@@ -30,6 +31,7 @@ export function Topbar({ onMenu }: { onMenu: () => void }) {
           </div>
         </div>
         <div className="flex items-center gap-1">
+          <SyncIndicator compact />
           <div className="hidden md:flex items-center gap-1">{alertItems.map((a, i) => (<Badge key={i} variant="outline" className={`gap-1 ${a.color} h-6 text-[10px] px-1.5`}>{a.icon}{a.count}</Badge>))}{alerts && alerts.totalReceivables > 0 && (<Badge variant="outline" className="gap-1 text-blue-500 h-6 text-[10px] px-1.5"><AlertCircle className="w-3 h-3" />{alerts.totalReceivables.toFixed(0)}</Badge>)}</div>
           <Button variant="ghost" size="icon" className="md:hidden rounded-full relative h-8 w-8"><Bell className="w-4 h-4" />{alertItems.length > 0 && (<span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-error" />)}</Button>
           <ThemeToggle compact />
