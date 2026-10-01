@@ -10,6 +10,22 @@ const SCHEMA_COLUMNS = {
     { name: 'failedLoginAttempts', type: 'INTEGER', default: '0' }, { name: 'lockedUntil', type: 'DATETIME' },
     { name: 'createdAt', type: 'DATETIME' }, { name: 'updatedAt', type: 'DATETIME' },
   ],
+  Product: [
+    { name: 'id', type: 'TEXT' }, { name: 'name', type: 'TEXT' }, { name: 'internalCode', type: 'TEXT' },
+    { name: 'barcode', type: 'TEXT' }, { name: 'gs1Code', type: 'TEXT' }, { name: 'image', type: 'TEXT' },
+    { name: 'categoryId', type: 'TEXT' }, { name: 'brandId', type: 'TEXT' }, { name: 'supplierId', type: 'TEXT' },
+    { name: 'purchasePrice', type: 'REAL', default: '0' }, { name: 'salePrice', type: 'REAL', default: '0' },
+    { name: 'wholesalePrice', type: 'REAL', default: '0' },
+    { name: 'stock', type: 'REAL', default: '0' }, { name: 'minStock', type: 'REAL', default: '0' },
+    { name: 'unit', type: 'TEXT', default: "'unidad'" },
+    { name: 'locationWarehouse', type: 'TEXT' }, { name: 'locationAisle', type: 'TEXT' },
+    { name: 'locationShelf', type: 'TEXT' }, { name: 'locationLevel', type: 'TEXT' },
+    { name: 'expiryDate', type: 'DATETIME' }, { name: 'lot', type: 'TEXT' },
+    { name: 'status', type: 'TEXT', default: "'active'" },
+    { name: 'isFavorite', type: 'BOOLEAN', default: '0' },
+    { name: 'isBundle', type: 'BOOLEAN', default: '0' },
+    { name: 'createdAt', type: 'DATETIME' }, { name: 'updatedAt', type: 'DATETIME' },
+  ],
 }
 async function getExistingColumns(db, table) { try { const rows = await db.$queryRawUnsafe(`PRAGMA table_info("${table}")`); return rows.map((r) => r.name) } catch (e) { return [] } }
 async function migrateDatabase() {
