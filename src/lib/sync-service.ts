@@ -110,6 +110,7 @@ async function syncFirebase(collection: string, config: DatabaseConfig, directio
   // UPLOAD
   if (direction === 'upload' || direction === 'both') {
     const localData = await readLocal(collection)
+    const localIds = new Set(localData.map((i) => String(i.id)).filter(Boolean))
     if (localData.length) {
       const BATCH_SIZE = 400
       let processed = 0
@@ -148,6 +149,37 @@ async function syncFirebase(collection: string, config: DatabaseConfig, directio
         processed += slice.length
       }
       result.uploaded = localData.length
+    }
+
+    // ── CLEANUP: Eliminar de Firebase los documentos que ya no existen en SQLite
+    // Esto propaga las eliminaciones (hard-delete) de POS Pro → Firebase → Web admin
+    // Solo se aplica a colecciones donde POS Pro es la fuente de verdad
+    const CLEANUP_COLLECTIONS = ['products', 'categories', 'suppliers', 'brands']
+    if (CLEANUP_COLLECTIONS.includes(collection)) {
+      try {
+        const remoteSnap = await getDocs(colRef)
+        const toDelete: string[] = []
+        remoteSnap.forEach((d) => {
+          if (!localIds.has(d.id)) {
+            toDelete.push(d.id)
+          }
+        })
+        if (toDelete.length > 0) {
+          const BATCH_SIZE = 400
+          let delProcessed = 0
+          while (delProcessed < toDelete.length) {
+            const slice = toDelete.slice(delProcessed, delProcessed + BATCH_SIZE)
+            const batch = writeBatch(fs)
+            for (const id of slice) {
+              batch.delete(doc(colRef, id))
+            }
+            await batch.commit()
+            delProcessed += slice.length
+          }
+        }
+      } catch (e) {
+        result.errors.push(`${collection} cleanup: ${(e as Error).message}`)
+      }
     }
   }
 

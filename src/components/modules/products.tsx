@@ -149,6 +149,9 @@ export default function Products() {
             toast.success('Producto eliminado')
             qc.invalidateQueries({ queryKey: ['products'] })
             setDeleteTarget(null)
+            // 🔥 Sincronizar inmediatamente a Firebase para que el cambio
+            // (soft-delete o hard-delete) se refleje en POS CREARD Web
+            triggerGlobalSync()
           } catch (e) { toast.error((e as Error).message) }
         }}
       />
