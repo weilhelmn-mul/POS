@@ -115,6 +115,26 @@ export default function Pos() {
     return () => window.removeEventListener('keydown', onKey)
   }, [q, products, scannerEnabled])
 
+  // Auto-add cuando el lector USB termina de escribir (sin necesidad de Enter)
+  // Algunos lectores no envían Enter al final; este debounce de 200ms cubre ese caso.
+  // Solo dispara si: scanner activo + input enfocado (ej: tras clic en "Carrito vacío")
+  // + el código coincide EXACTAMENTE con un barcode/internalCode de un producto.
+  // addItem() en el store ya incrementa cantidad si el producto ya está en el carrito.
+  useEffect(() => {
+    if (!scannerEnabled || !q) return
+    // Buscar coincidencia exacta (barcode o internalCode)
+    const found = (products?.products || []).find((p) => p.barcode === q || p.internalCode === q)
+    if (!found) return
+    // Esperar 200ms por si vienen más caracteres (el lector escribe rápido)
+    const timer = setTimeout(() => {
+      // Re-verificar foco al disparar (el usuario pudo haber hecho clic en otro lado)
+      if (document.activeElement !== searchRef.current) return
+      addToCart(found)
+      setQ('')
+    }, 200)
+    return () => clearTimeout(timer)
+  }, [q, products, scannerEnabled])
+
   const confirmSale = async (splits: PaymentSplit[], method: string) => {
     if (!activeSale || items.length === 0) { toast.error('Carrito vacío'); return }
     const payload = {
